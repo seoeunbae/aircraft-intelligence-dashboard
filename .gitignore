@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.env
+client_secret.json
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+.omc
+.claude

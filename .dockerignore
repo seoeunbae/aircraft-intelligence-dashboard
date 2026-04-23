@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.git/
+.omc/
+.claude/
+terraform/
+client_secret.json
+adk_runner.py
+start.sh
+*.md

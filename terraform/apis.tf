@@ -1,0 +1,21 @@
+locals {
+  required_apis = [
+    "run.googleapis.com",
+    "bigquery.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "iam.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "secretmanager.googleapis.com",
+    "iap.googleapis.com",
+    "compute.googleapis.com",
+  ]
+}
+
+resource "google_project_service" "apis" {
+  for_each = toset(local.required_apis)
+
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+}

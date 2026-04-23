@@ -1,0 +1,20 @@
+# terraform.tfvars.example
+# 이 파일을 terraform.tfvars 로 복사한 뒤 값을 채워주세요.
+# cp terraform.tfvars.example terraform.tfvars
+
+project_id      = "cloud-cycle-pj"
+region          = "asia-southeast1"
+bigquery_region = "asia-southeast3"
+
+bigquery_dataset = "mdas-dataset"
+bigquery_table   = "aircraft_dummy"
+
+service_name = "aircraft-dashboard"
+image_tag    = "latest"
+
+cloud_run_min_instances = 0
+cloud_run_max_instances = 3
+cloud_run_cpu           = "2"
+cloud_run_memory        = "2Gi"
+
+allow_public_access = true

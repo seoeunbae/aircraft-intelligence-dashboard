@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aircraft Intelligence Dashboard</title>
+  <script src="/static/chart.min.js"></script>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #21262d;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent2: #3fb950;
+      --warn: #d29922;
+      --danger: #f85149;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --radius: 8px;
+    }
+    html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif;
+                 background: var(--bg); color: var(--text); font-size: 14px; }
+
+    /* ── Layout ───────────────────────────────────────────── */
+    .layout { display: grid; height: 100vh;
+              grid-template-columns: 260px 1fr;
+              grid-template-rows: 56px 1fr; }
+
+    /* ── Top bar ──────────────────────────────────────────── */
+    .topbar { grid-column: 1 / -1; display: flex; align-items: center;
+              padding: 0 20px; gap: 12px;
+              background: var(--surface); border-bottom: 1px solid var(--border);
+              position: sticky; top: 0; z-index: 100; }
+    .topbar .logo { font-size: 18px; font-weight: 700; color: var(--accent);
+                    letter-spacing: 1px; }
+    .topbar .subtitle { color: var(--muted); font-size: 12px; }
+    .topbar .badge { margin-left: auto; padding: 3px 10px; border-radius: 12px;
+                     font-size: 11px; font-weight: 600;
+                     background: rgba(88,166,255,.15); color: var(--accent);
+                     border: 1px solid rgba(88,166,255,.3); }
+
+    /* ── Sidebar ──────────────────────────────────────────── */
+    .sidebar { background: var(--surface); border-right: 1px solid var(--border);
+               display: flex; flex-direction: column; overflow: hidden; }
+    .sidebar nav { padding: 12px 8px; }
+    .nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+                border-radius: var(--radius); cursor: pointer; color: var(--muted);
+                transition: background .15s, color .15s; font-size: 13px; }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: rgba(88,166,255,.12); color: var(--accent);
+                       font-weight: 600; }
+    .nav-item .icon { width: 18px; text-align: center; }
+
+    /* ── Main content ─────────────────────────────────────── */
+    .main { overflow-y: auto; display: flex; flex-direction: column; }
+
+    /* ── Panels ───────────────────────────────────────────── */
+    .panel { display: none; padding: 20px; gap: 16px; flex-direction: column; }
+    .panel.active { display: flex; }
+
+    /* ── KPI table ────────────────────────────────────────── */
+    .kpi-table-wrap { background: var(--surface); border: 1px solid var(--border);
+                      border-radius: var(--radius); overflow: hidden; }
+    .kpi-table-wrap table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .kpi-table-wrap thead th { background: var(--surface2); padding: 10px 16px; text-align: left;
+                                font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+                                font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+    .kpi-table-wrap tbody td { padding: 10px 16px; border-bottom: 1px solid var(--border); }
+    .kpi-table-wrap tbody tr:last-child td { border-bottom: none; }
+    .kpi-table-wrap tbody tr:hover td { background: var(--surface2); }
+    .kpi-table-wrap .kpi-metric { color: var(--muted); font-size: 12px; }
+    .kpi-table-wrap .kpi-value  { font-weight: 700; font-size: 15px; color: var(--accent); text-align: right; }
+    .kpi-table-wrap .kpi-desc   { color: var(--muted); font-size: 11px; text-align: right; }
+
+    /* ── Chart grid ───────────────────────────────────────── */
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+                  gap: 16px; }
+    .chart-card { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius); padding: 16px; }
+    .chart-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 14px;
+                     color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    .chart-card canvas { height: 240px !important; }
+
+    /* ── Data table ───────────────────────────────────────── */
+    .table-wrap { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius); overflow: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    thead th { background: var(--surface2); padding: 10px 12px; text-align: left;
+               font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+               white-space: nowrap; position: sticky; top: 0; }
+    tbody td { padding: 8px 12px; border-bottom: 1px solid var(--border);
+               white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+    tbody tr:hover td { background: var(--surface2); }
+    .pagination { display: flex; gap: 8px; align-items: center; padding: 12px 16px;
+                  justify-content: flex-end; }
+    .btn { padding: 6px 14px; border-radius: var(--radius); border: 1px solid var(--border);
+           background: var(--surface2); color: var(--text); cursor: pointer;
+           font-size: 12px; transition: background .15s; }
+    .btn:hover { background: var(--border); }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .page-info { color: var(--muted); font-size: 12px; }
+
+    /* ── Status badge ─────────────────────────────────────── */
+    .status { display: inline-block; padding: 2px 8px; border-radius: 10px;
+              font-size: 11px; font-weight: 600; }
+    .status.active      { background: rgba(63,185,80,.15);  color: var(--accent2); }
+    .status.inactive    { background: rgba(248,81,73,.15);  color: var(--danger); }
+    .status.maintenance { background: rgba(210,153,34,.15); color: var(--warn); }
+
+    /* ── Chat panel ───────────────────────────────────────── */
+    #panel-chat { height: calc(100vh - 56px); padding: 0; }
+    .chat-container { display: flex; flex-direction: column; height: 100%; }
+    .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex;
+                     flex-direction: column; gap: 12px; }
+    .message { display: flex; gap: 10px; max-width: 80%; }
+    .message.user { align-self: flex-end; flex-direction: row-reverse; }
+    .message .avatar { width: 32px; height: 32px; border-radius: 50%;
+                       display: flex; align-items: center; justify-content: center;
+                       font-size: 14px; flex-shrink: 0; }
+    .message.user .avatar { background: var(--accent); }
+    .message.agent .avatar { background: var(--surface2); border: 1px solid var(--border); }
+    .message .bubble { padding: 10px 14px; border-radius: 12px; line-height: 1.55;
+                       font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+    .message.user .bubble  { background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+    .message.agent .bubble { background: var(--surface); border: 1px solid var(--border);
+                              color: var(--text); border-bottom-left-radius: 4px; }
+    .message.agent .bubble .thinking { color: var(--muted); font-style: italic; }
+
+    .chat-input-wrap { padding: 16px 20px; background: var(--surface);
+                       border-top: 1px solid var(--border); display: flex; gap: 10px; }
+    .chat-input { flex: 1; background: var(--surface2); border: 1px solid var(--border);
+                  border-radius: var(--radius); padding: 10px 14px; color: var(--text);
+                  font-size: 13px; resize: none; outline: none; font-family: inherit;
+                  min-height: 44px; max-height: 120px; transition: border-color .2s; }
+    .chat-input:focus { border-color: var(--accent); }
+    .send-btn { padding: 10px 18px; background: var(--accent);
+                border: none; border-radius: var(--radius); color: #fff;
+                font-size: 13px; font-weight: 600; cursor: pointer;
+                transition: opacity .15s; }
+    .send-btn:hover { opacity: .85; }
+    .send-btn:disabled { opacity: .4; cursor: default; }
+    .suggestions { padding: 8px 20px 0; display: flex; flex-wrap: wrap; gap: 8px; }
+    .suggestion { padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
+                  border-radius: 16px; font-size: 12px; color: var(--muted); cursor: pointer;
+                  transition: border-color .2s, color .2s; }
+    .suggestion:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Suggestion category tabs ─────────────────────────────── */
+    .suggestion-tabs { display: flex; gap: 6px; padding: 12px 20px 4px;
+                       border-bottom: 1px solid var(--border); background: var(--bg); }
+    .stab { padding: 5px 14px; border-radius: 14px; font-size: 11px; font-weight: 600;
+            cursor: pointer; border: 1px solid var(--border); color: var(--muted);
+            background: transparent; transition: all .15s; white-space: nowrap; }
+    .stab:hover { border-color: var(--accent); color: var(--accent); }
+    .stab.active { background: rgba(88,166,255,.15); border-color: var(--accent);
+                   color: var(--accent); }
+    .stab.insight { }
+    .stab.insight.active { background: rgba(63,185,80,.15); border-color: var(--accent2);
+                           color: var(--accent2); }
+
+    /* ── Equipment selector bar ───────────────────────────────── */
+    .equip-bar { display: none; padding: 8px 20px; background: var(--bg);
+                 border-bottom: 1px solid var(--border); gap: 8px;
+                 align-items: center; flex-wrap: wrap; }
+    .equip-bar.visible { display: flex; }
+    .equip-bar label { font-size: 11px; font-weight: 600; color: var(--accent2);
+                       white-space: nowrap; }
+    .equip-input { flex: 1; min-width: 160px; max-width: 280px; background: var(--surface2);
+                   border: 1px solid var(--border); border-radius: var(--radius);
+                   padding: 6px 10px; color: var(--text); font-size: 12px; outline: none;
+                   transition: border-color .2s; }
+    .equip-input:focus { border-color: var(--accent2); }
+    .equip-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+    .equip-preset { padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border);
+                    background: transparent; color: var(--muted); font-size: 11px;
+                    cursor: pointer; transition: all .15s; }
+    .equip-preset:hover, .equip-preset.selected { border-color: var(--accent2);
+                                                   color: var(--accent2);
+                                                   background: rgba(63,185,80,.1); }
+
+    /* ── Insight badge on bubble ──────────────────────────────── */
+    .insight-badge { display: inline-block; padding: 2px 8px; border-radius: 8px;
+                     font-size: 10px; font-weight: 700; background: rgba(63,185,80,.15);
+                     color: var(--accent2); border: 1px solid rgba(63,185,80,.3);
+                     margin-bottom: 8px; letter-spacing: .4px; }
+
+    /* ── Inline chat chart ────────────────────────────────── */
+    .chat-chart-wrap { margin-top: 12px; background: var(--surface2);
+                       border-radius: var(--radius); padding: 12px; max-width: 520px; }
+    .chat-chart-wrap canvas { max-height: 260px; }
+    .chat-chart-title { font-size: 11px; font-weight: 600; color: var(--muted);
+                        text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+
+    /* ── Inline chat stats table ──────────────────────────── */
+    .chat-table-wrap { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .chat-table-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .chat-table-wrap thead th { background: transparent; padding: 5px 8px; text-align: left;
+        font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+        font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+    .chat-table-wrap tbody td { padding: 5px 8px; border-bottom: 1px solid rgba(48,54,61,.6);
+        color: var(--text); }
+    .chat-table-wrap tbody tr:last-child td { border-bottom: none; }
+    .chat-table-wrap tbody tr:hover td { background: rgba(255,255,255,.04); }
+    .ct-rank { color: var(--muted) !important; width: 24px; font-size: 11px; }
+    .ct-label { word-break: break-word; }
+    .ct-value { text-align: right; font-weight: 700; color: var(--accent) !important;
+                white-space: nowrap; padding-left: 16px !important; }
+    .ct-pct { text-align: right; color: var(--muted) !important; width: 48px; font-size: 11px; }
+
+    /* ── Inline chat markdown table ─────────────────────────── */
+    .chat-md-table { margin: 10px 0; border-radius: var(--radius); overflow: auto;
+                     border: 1px solid var(--border); max-width: 100%; }
+    .chat-md-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .chat-md-table thead th { background: var(--surface2); padding: 8px 12px; text-align: left;
+                               font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border);
+                               font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+                               white-space: nowrap; }
+    .chat-md-table tbody td { padding: 7px 12px; border-bottom: 1px solid var(--border);
+                               color: var(--text); }
+    .chat-md-table tbody tr:last-child td { border-bottom: none; }
+    .chat-md-table tbody tr:hover td { background: rgba(88,166,255,.05); }
+
+    /* ── Inline chat KV stats table ─────────────────────────── */
+    .chat-kv-table { margin: 10px 0; border-radius: var(--radius); overflow: hidden;
+                     border: 1px solid var(--border); }
+    .chat-kv-table table { width: 100%; border-collapse: collapse; }
+    .ckv-key { padding: 8px 14px; color: var(--muted); background: var(--surface2);
+               font-size: 11px; text-transform: uppercase; letter-spacing: .4px;
+               font-weight: 600; border-bottom: 1px solid var(--border);
+               white-space: nowrap; width: 42%; }
+    .ckv-val { padding: 8px 14px; font-weight: 700; font-size: 13px;
+               color: var(--accent); border-bottom: 1px solid var(--border); }
+    .chat-kv-table tr:last-child .ckv-key,
+    .chat-kv-table tr:last-child .ckv-val { border-bottom: none; }
+    .chat-kv-table tr:hover .ckv-key { background: rgba(88,166,255,.08); }
+    .chat-kv-table tr:hover .ckv-val { background: rgba(88,166,255,.04); }
+
+    /* ── Loading spinner ──────────────────────────────────── */
+    .spinner { display: inline-block; width: 16px; height: 16px;
+               border: 2px solid var(--border); border-top-color: var(--accent);
+               border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Refresh button ───────────────────────────────────── */
+    .refresh-btn { padding: 5px 12px; background: transparent; border: 1px solid var(--border);
+                   border-radius: var(--radius); color: var(--muted); cursor: pointer;
+                   font-size: 12px; transition: color .15s, border-color .15s; }
+    .refresh-btn:hover { color: var(--accent); border-color: var(--accent); }
+    .panel-header { display: flex; align-items: center; justify-content: space-between;
+                    margin-bottom: 4px; }
+    .panel-title { font-size: 16px; font-weight: 700; }
+    .panel-sub { font-size: 12px; color: var(--muted); }
+    .error-msg { color: var(--danger); background: rgba(248,81,73,.1);
+                 border: 1px solid rgba(248,81,73,.3); border-radius: var(--radius);
+                 padding: 10px 14px; font-size: 13px; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Top bar -->
+  <header class="topbar">
+    <span class="logo">&#9992; AircraftIQ</span>
+    <span class="subtitle">Powered by Google ADK + BigQuery</span>
+    <span class="badge">cloud-cycle-pj &bull; mdas-dataset</span>
+  </header>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <nav>
+      <div class="nav-item active" data-panel="dashboard" onclick="switchPanel('dashboard', this)">
+        <span class="icon">&#128202;</span> Dashboard
+      </div>
+      <div class="nav-item" data-panel="data" onclick="switchPanel('data', this)">
+        <span class="icon">&#128196;</span> Data Table
+      </div>
+      <div class="nav-item" data-panel="chat" onclick="switchPanel('chat', this)">
+        <span class="icon">&#129302;</span> AI Chat
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Dashboard panel -->
+    <div id="panel-dashboard" class="panel active">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Maintenance Overview</div>
+          <div class="panel-sub">Live data from <code>aircraft_dummy</code></div>
+        </div>
+        <button class="refresh-btn" onclick="loadDashboard()">&#8635; Refresh</button>
+      </div>
+      <div class="kpi-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Metric</th>
+              <th style="text-align:right">Value</th>
+              <th style="text-align:right">Description</th>
+            </tr>
+          </thead>
+          <tbody id="kpi-tbody"></tbody>
+        </table>
+      </div>
+      <div id="chart-error" class="error-msg" style="display:none"></div>
+      <div class="chart-grid">
+        <div class="chart-card">
+          <h3>Top ATA Codes</h3>
+          <canvas id="chart-status"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Aircraft Types (Top 10)</h3>
+          <canvas id="chart-type"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Operators / Airlines (Top 10)</h3>
+          <canvas id="chart-airline"></canvas>
+        </div>
+        <div class="chart-card">
+          <h3>Top Component Keywords</h3>
+          <canvas id="chart-routes"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Table panel -->
+    <div id="panel-data" class="panel">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Aircraft Data</div>
+          <div class="panel-sub">Browsing <code>aircraft_dummy</code> table</div>
+        </div>
+        <button class="refresh-btn" onclick="loadTable()">&#8635; Refresh</button>
+      </div>
+      <div id="table-error" class="error-msg" style="display:none"></div>
+      <div class="table-wrap">
+        <table>
+          <thead id="table-head"></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button class="btn" id="btn-prev" onclick="prevPage()" disabled>&#8592; Prev</button>
+        <span class="page-info" id="page-info">Page 1</span>
+        <button class="btn" id="btn-next" onclick="nextPage()">Next &#8594;</button>
+      </div>
+    </div>
+
+    <!-- Chat panel -->
+    <div id="panel-chat" class="panel">
+      <div class="chat-container">
+        <div id="chat-messages" class="chat-messages">
+          <div class="message agent">
+            <div class="avatar">&#129302;</div>
+            <div class="bubble">안녕하세요! 저는 항공기 인텔리전스 어시스턴트입니다. <strong>aircraft_dummy</strong> BigQuery 데이터셋에 직접 접근할 수 있습니다.<br><br>
+            항공기 현황 분석, 노선 분석, 기종별 분포, 운항사 정보 등 항공 데이터에 대해 무엇이든 질문해 보세요. 어떻게 도와드릴까요?</div>
+          </div>
+        </div>
+        <div id="equip-bar" class="equip-bar">
+          <label>&#128269; 설비 지정:</label>
+          <input id="equip-input" class="equip-input" type="text" placeholder="예: APU, 유압 펌프, ATA 32…" oninput="onEquipInput()" />
+          <div class="equip-presets">
+            <button class="equip-preset" onclick="selectPreset(this, 'APU')">APU</button>
+            <button class="equip-preset" onclick="selectPreset(this, '랜딩기어 (ATA 32)')">랜딩기어</button>
+            <button class="equip-preset" onclick="selectPreset(this, '엔진 (ATA 71-80)')">엔진</button>
+            <button class="equip-preset" onclick="selectPreset(this, '유압 시스템 (ATA 29)')">유압</button>
+            <button class="equip-preset" onclick="selectPreset(this, '항공전자 (Avionics)')">항공전자</button>
+            <button class="equip-preset" onclick="selectPreset(this, '산소 시스템 (ATA 35)')">산소</button>
+          </div>
+        </div>
+        <div class="suggestion-tabs" id="suggestion-tabs">
+          <button class="stab active" onclick="switchSuggestionTab('general', this)">&#128202; 일반 분석</button>
+          <button class="stab insight" onclick="switchSuggestionTab('insight', this)">&#128269; 특정 설비 분석</button>
+        </div>
+        <div class="suggestions" id="suggestions">
+          <!-- general tab (default) -->
+          <div class="suggestion" data-tab="general" onclick="sendSuggestion(this)">항공기 유형별 분포를 파이 차트로 보여줘</div>
+          <div class="suggestion" data-tab="general" onclick="sendSuggestion(this)">NR 건수 기준 상위 10개 ATA 코드</div>
+          <div class="suggestion" data-tab="general" onclick="sendSuggestion(this)">정비 기록이 가장 많은 운항사는?</div>
+          <div class="suggestion" data-tab="general" onclick="sendSuggestion(this)">월별 NR 발생 추이 분석</div>
+          <div class="suggestion" data-tab="general" onclick="sendSuggestion(this)">컴포넌트 키워드 빈도 상위 목록</div>
+          <!-- insight tab (hidden initially) -->
+          <div class="suggestion" data-tab="insight" style="display:none" onclick="sendSuggestion(this)">APU 관련 NR 기록을 분석해서 결함 패턴과 주요 발생 기종을 알려줘</div>
+          <div class="suggestion" data-tab="insight" style="display:none" onclick="sendSuggestion(this)">ATA 32(랜딩기어) 시스템의 전체 NR 현황과 월별 추이를 보여줘</div>
+          <div class="suggestion" data-tab="insight" style="display:none" onclick="sendSuggestion(this)">유압 펌프 관련 정비 기록에서 가장 많이 나타나는 결함과 교정 조치를 분석해줘</div>
+          <div class="suggestion" data-tab="insight" style="display:none" onclick="sendSuggestion(this)">엔진 관련 NR에서 반복 발생 빈도가 높은 항공기 등록번호를 찾아줘</div>
+          <div class="suggestion" data-tab="insight" style="display:none" onclick="sendSuggestion(this)">항공전자(Avionics) 설비의 운항사별 NR 분포와 결함 유형을 비교해줘</div>
+        </div>
+        <div class="chat-input-wrap">
+          <textarea id="chat-input" class="chat-input" placeholder="항공 데이터에 대해 질문해 보세요…" rows="1"
+            onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+          <button class="send-btn" id="send-btn" onclick="sendMessage()">전송</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── Panel switching ────────────────────────────────────────────────────────
+function switchPanel(id, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-' + id).classList.add('active');
+  el.classList.add('active');
+  if (id === 'dashboard') loadDashboard();
+  if (id === 'data') loadTable();
+}
+
+// ── Colour helpers ─────────────────────────────────────────────────────────
+const PALETTE = [
+  '#58a6ff','#3fb950','#d29922','#f85149','#bc8cff',
+  '#79c0ff','#56d364','#e3b341','#ff7b72','#d2a8ff',
+];
+function palette(n) {
+  return Array.from({length: n}, (_, i) => PALETTE[i % PALETTE.length]);
+}
+
+// ── Chart instances ────────────────────────────────────────────────────────
+const charts = {};
+function makeChart(id, type, labels, values, options = {}) {
+  if (charts[id]) charts[id].destroy();
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {
+    type,
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: palette(labels.length),
+        borderColor: type === 'bar' ? palette(labels.length) : '#0d1117',
+        borderWidth: type === 'bar' ? 0 : 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#8b949e', font: { size: 11 } },
+                  position: type === 'doughnut' ? 'right' : 'top' },
+        tooltip: { titleColor: '#e6edf3', bodyColor: '#8b949e' },
+      },
+      scales: type === 'bar' ? {
+        x: { ticks: { color: '#8b949e', font: { size: 10 } },
+             grid: { color: '#21262d' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 } },
+             grid: { color: '#21262d' } },
+      } : {},
+      ...options,
+    }
+  });
+}
+
+// ── Dashboard ──────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const errEl = document.getElementById('chart-error');
+  errEl.style.display = 'none';
+  try {
+    const [summary, charts_data] = await Promise.all([
+      fetch('/api/data/summary').then(r => r.json()),
+      fetch('/api/data/charts').then(r => r.json()),
+    ]);
+
+    // KPI table
+    const kpiDefs = [
+      { key: 'total_records',  label: 'Total NR Records', sub: 'maintenance records' },
+      { key: 'total_aircraft', label: 'Unique Aircraft',  sub: 'distinct AC_NO' },
+      { key: 'aircraft_types', label: 'Aircraft Types',   sub: 'distinct models' },
+      { key: 'operators',      label: 'Operators',        sub: 'airlines (AMP)' },
+      { key: 'ata_codes',      label: 'ATA Codes',        sub: 'distinct systems' },
+      { key: 'earliest_date',  label: 'Earliest Record',  sub: 'NR_REQUEST_DATE min' },
+      { key: 'latest_date',    label: 'Latest Record',    sub: 'NR_REQUEST_DATE max' },
+    ];
+    document.getElementById('kpi-tbody').innerHTML = kpiDefs.map(d => `
+      <tr>
+        <td class="kpi-metric">${d.label}</td>
+        <td class="kpi-value">${summary[d.key] ?? '–'}</td>
+        <td class="kpi-desc">${d.sub}</td>
+      </tr>`).join('');
+
+    // Charts
+    if (charts_data.ata_code?.length) {
+      makeChart('chart-status', 'doughnut',
+        charts_data.ata_code.map(r => r.label),
+        charts_data.ata_code.map(r => r.value));
+    }
+    if (charts_data.aircraft_type?.length) {
+      makeChart('chart-type', 'bar',
+        charts_data.aircraft_type.map(r => r.label),
+        charts_data.aircraft_type.map(r => r.value));
+    }
+    if (charts_data.operator?.length) {
+      makeChart('chart-airline', 'bar',
+        charts_data.operator.map(r => r.label),
+        charts_data.operator.map(r => r.value));
+    }
+    if (charts_data.component_keyword?.length) {
+      makeChart('chart-routes', 'bar',
+        charts_data.component_keyword.map(r => r.label),
+        charts_data.component_keyword.map(r => r.value));
+    }
+  } catch (e) {
+    errEl.textContent = 'Failed to load dashboard data: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// ── Data table ─────────────────────────────────────────────────────────────
+let tableOffset = 0;
+const PAGE_SIZE = 50;
+
+async function loadTable() {
+  const errEl = document.getElementById('table-error');
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch(`/api/data/table?limit=${PAGE_SIZE}&offset=${tableOffset}`);
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+
+    const rows = data.rows;
+    if (!rows.length) { document.getElementById('table-body').innerHTML = '<tr><td colspan="99" style="text-align:center;color:var(--muted);padding:24px">No data found</td></tr>'; return; }
+
+    const cols = Object.keys(rows[0]);
+    document.getElementById('table-head').innerHTML =
+      '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+
+    document.getElementById('table-body').innerHTML = rows.map(row =>
+      '<tr>' + cols.map(c => {
+        const v = row[c];
+        if (c.toLowerCase() === 'status' && v) {
+          return `<td><span class="status ${v.toLowerCase()}">${v}</span></td>`;
+        }
+        return `<td title="${v ?? ''}">${v ?? ''}</td>`;
+      }).join('') + '</tr>'
+    ).join('');
+
+    const page = Math.floor(tableOffset / PAGE_SIZE) + 1;
+    document.getElementById('page-info').textContent = `Page ${page}`;
+    document.getElementById('btn-prev').disabled = tableOffset === 0;
+    document.getElementById('btn-next').disabled = rows.length < PAGE_SIZE;
+  } catch (e) {
+    errEl.textContent = 'Failed to load table: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function prevPage() { if (tableOffset >= PAGE_SIZE) { tableOffset -= PAGE_SIZE; loadTable(); } }
+function nextPage() { tableOffset += PAGE_SIZE; loadTable(); }
+
+// ── Chat text formatter ────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function mdInline(s) {
+  s = escHtml(s);
+  s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  s = s.replace(/`([^`]+)`/g,
+    '<code style="background:var(--surface2);padding:1px 5px;border-radius:3px;font-size:11px;font-family:monospace">$1</code>');
+  return s;
+}
+
+function formatAgentText(text) {
+  // Matches "Key: Value", "**Key:** Value", "- Key: Value", "1. Key: Value" etc.
+  const kvRe = /^(?:[-•*]|\d+\.)?\s*\*{0,2}([^:*\n]{1,60}?)\*{0,2}:\s*\*{0,2}(.+?)\*{0,2}\s*$/;
+
+  const lines = text.split('\n');
+  let html = '';
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    // Empty line → spacing
+    if (!line) {
+      i++;
+      while (i < lines.length && !lines[i].trim()) i++;
+      if (i < lines.length) html += '<br>';
+      continue;
+    }
+
+    // Heading: ## Title
+    const headMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headMatch) {
+      const sz = ['15px', '14px', '13px'][headMatch[1].length - 1];
+      html += `<div style="font-size:${sz};font-weight:700;margin:8px 0 4px;color:var(--text)">${mdInline(headMatch[2])}</div>`;
+      i++; continue;
+    }
+
+    // Horizontal rule
+    if (/^[-─]{3,}$/.test(line)) {
+      html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+      i++; continue;
+    }
+
+    // Markdown table (lines starting with |)
+    if (line.startsWith('|')) {
+      const tableLines = [];
+      let k = i;
+      while (k < lines.length && lines[k].trim().startsWith('|')) {
+        tableLines.push(lines[k].trim());
+        k++;
+      }
+      const isSep = l => /^\|[\s|:\-]+\|?\s*$/.test(l);
+      const dataLines = tableLines.filter(l => !isSep(l));
+      if (dataLines.length >= 1) {
+        const headers = dataLines[0].split('|').slice(1, -1).map(c => c.trim());
+        const bodyRows = dataLines.slice(1);
+        let tableHtml = '<div class="chat-md-table"><table><thead><tr>';
+        tableHtml += headers.map(h => `<th>${mdInline(h)}</th>`).join('');
+        tableHtml += '</tr></thead><tbody>';
+        for (const row of bodyRows) {
+          const cells = row.split('|').slice(1, -1).map(c => c.trim());
+          tableHtml += '<tr>' + cells.map(cell => `<td>${mdInline(cell)}</td>`).join('') + '</tr>';
+        }
+        tableHtml += '</tbody></table></div>';
+        html += tableHtml;
+        i = k;
+        continue;
+      }
+    }
+
+    // Detect a block of ≥2 consecutive KV lines → render as stats table
+    let j = i;
+    const kvRows = [];
+    while (j < lines.length) {
+      const l = lines[j].trim();
+      if (!l) break;
+      const m = l.match(kvRe);
+      if (m) {
+        kvRows.push({ key: m[1].trim().replace(/\*/g, ''), val: m[2].trim().replace(/\*/g, '') });
+        j++;
+      } else break;
+    }
+
+    if (kvRows.length >= 2) {
+      html += '<div class="chat-kv-table"><table><tbody>' +
+        kvRows.map(r => `<tr>
+          <td class="ckv-key">${mdInline(r.key)}</td>
+          <td class="ckv-val">${mdInline(r.val)}</td>
+        </tr>`).join('') +
+        '</tbody></table></div>';
+      i = j; continue;
+    }
+
+    // Bullet / numbered list (non-KV)
+    const bulletMatch = line.match(/^(?:[-•*]|\d+\.)\s+(.+)$/);
+    if (bulletMatch) {
+      const items = [];
+      let k = i;
+      while (k < lines.length) {
+        const bl = lines[k].trim();
+        const bm = bl.match(/^(?:[-•*]|\d+\.)\s+(.+)$/);
+        if (bm && !bl.match(kvRe)) { items.push(bm[1]); k++; }
+        else break;
+      }
+      if (items.length) {
+        html += '<ul style="margin:4px 0 4px 18px;padding:0">' +
+          items.map(it => `<li style="margin:3px 0">${mdInline(it)}</li>`).join('') +
+          '</ul>';
+        i = k; continue;
+      }
+    }
+
+    // Regular text line
+    html += `<span>${mdInline(line)}</span><br>`;
+    i++;
+  }
+
+  return html.replace(/(<br>\s*)+$/, '');
+}
+
+// ── Chat ───────────────────────────────────────────────────────────────────
+let sessionId = null;
+let isThinking = false;
+let chatChartCounter = 0;
+
+function appendMessage(role, text, chartData = null) {
+  const wrap = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'message ' + role;
+  const avatar = role === 'user' ? '&#128100;' : '&#129302;';
+
+  let chartHtml = '';
+  let chartId = null;
+  if (chartData && role === 'agent') {
+    chartId = 'chat-chart-' + (++chatChartCounter);
+    const titleHtml = chartData.title
+      ? `<div class="chat-chart-title">${chartData.title}</div>` : '';
+
+    chartHtml = `<div class="chat-chart-wrap">${titleHtml}<canvas id="${chartId}"></canvas></div>`;
+  }
+
+  const bodyHtml = role === 'agent'
+    ? formatAgentText(text)
+    : escHtml(text).replace(/\n/g, '<br>');
+  div.innerHTML = `<div class="avatar">${avatar}</div>
+    <div class="bubble">${bodyHtml}${chartHtml}</div>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+
+  if (chartId && chartData) {
+    renderChatChart(chartId, chartData);
+  }
+  return div;
+}
+
+function renderChatChart(canvasId, chartData) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const type = chartData.type || 'bar';
+  const isCircular = type === 'pie' || type === 'doughnut';
+  new Chart(ctx.getContext('2d'), {
+    type,
+    data: {
+      labels: chartData.labels,
+      datasets: [{
+        data: chartData.values,
+        backgroundColor: palette(chartData.labels.length),
+        borderColor: isCircular ? '#0d1117' : palette(chartData.labels.length),
+        borderWidth: isCircular ? 2 : 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          display: true,
+          labels: { color: '#8b949e', font: { size: 11 } },
+          position: isCircular ? 'right' : 'top',
+        },
+        tooltip: { titleColor: '#e6edf3', bodyColor: '#8b949e' },
+      },
+      scales: !isCircular ? {
+        x: { ticks: { color: '#8b949e', font: { size: 10 }, maxRotation: 35 },
+             grid: { color: '#21262d' } },
+        y: { ticks: { color: '#8b949e', font: { size: 10 } },
+             grid: { color: '#21262d' } },
+      } : {},
+    }
+  });
+}
+
+function appendThinking() {
+  const wrap = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'message agent';
+  div.id = 'thinking-bubble';
+  div.innerHTML = `<div class="avatar">&#129302;</div>
+    <div class="bubble thinking"><span class="spinner"></span>&nbsp; 데이터를 분석 중입니다…</div>`;
+  wrap.appendChild(div);
+  wrap.scrollTop = wrap.scrollHeight;
+}
+
+function removeThinking() {
+  const el = document.getElementById('thinking-bubble');
+  if (el) el.remove();
+}
+
+async function sendMessage() {
+  if (isThinking) return;
+  const input = document.getElementById('chat-input');
+  const rawText = input.value.trim();
+  if (!rawText) return;
+  const prefix = activeSuggestionTab === 'insight' ? buildEquipPrefix() : '';
+  const text = prefix + rawText;
+
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('suggestions').style.display = 'none';
+  appendMessage('user', rawText);
+  appendThinking();
+  isThinking = true;
+  document.getElementById('send-btn').disabled = true;
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, session_id: sessionId }),
+    });
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+    sessionId = data.session_id;
+    removeThinking();
+    appendMessage('agent', data.response, data.chart_data || null);
+    if (data.suggested_questions?.length) {
+      updateSuggestions(data.suggested_questions);
+    }
+  } catch (e) {
+    removeThinking();
+    appendMessage('agent', '&#9888; Error: ' + e.message);
+  } finally {
+    isThinking = false;
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('suggestions').style.display = 'flex';
+    input.focus();
+  }
+}
+
+let activeSuggestionTab = 'general';
+let selectedEquip = '';
+
+function switchSuggestionTab(tab, btn) {
+  activeSuggestionTab = tab;
+  document.querySelectorAll('.stab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.suggestion[data-tab]').forEach(el => {
+    el.style.display = (el.dataset.tab === tab || el.dataset.tab === 'agent') ? '' : 'none';
+  });
+  const equipBar = document.getElementById('equip-bar');
+  if (tab === 'insight') {
+    equipBar.classList.add('visible');
+  } else {
+    equipBar.classList.remove('visible');
+    selectedEquip = '';
+    document.querySelectorAll('.equip-preset').forEach(p => p.classList.remove('selected'));
+    document.getElementById('equip-input').value = '';
+  }
+}
+
+function selectPreset(btn, name) {
+  document.querySelectorAll('.equip-preset').forEach(p => p.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedEquip = name;
+  document.getElementById('equip-input').value = name;
+}
+
+function onEquipInput() {
+  selectedEquip = document.getElementById('equip-input').value.trim();
+  document.querySelectorAll('.equip-preset').forEach(p => {
+    p.classList.toggle('selected', p.textContent.trim() === selectedEquip);
+  });
+}
+
+function buildEquipPrefix() {
+  const eq = selectedEquip || document.getElementById('equip-input').value.trim();
+  return eq ? `[설비: ${eq}] ` : '';
+}
+
+function updateSuggestions(questions) {
+  document.querySelectorAll('.suggestion[data-tab="agent"]').forEach(el => el.remove());
+  const container = document.getElementById('suggestions');
+  questions.forEach(q => {
+    const el = document.createElement('div');
+    el.className = 'suggestion';
+    el.dataset.tab = 'agent';
+    el.textContent = q;
+    el.onclick = () => sendSuggestion(el);
+    container.appendChild(el);
+  });
+}
+
+function sendSuggestion(el) {
+  document.getElementById('chat-input').value = el.textContent;
+  sendMessage();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+loadDashboard();
+</script>
+</body>
+</html>
