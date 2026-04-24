@@ -104,11 +104,16 @@ WHERE
   )
 ```
 
-When counting or aggregating per component keyword, always explode COMPONENT_KEYWORD first:
+When counting or aggregating per component keyword, always explode COMPONENT_KEYWORD first using REGEXP_EXTRACT_ALL so any delimiter (comma, slash, semicolon, pipe, dash, etc.) is handled automatically:
 ```sql
 SELECT UPPER(TRIM(kw)) AS component, COUNT(*) AS nr_count
 FROM `{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`,
-     UNNEST(SPLIT(COMPONENT_KEYWORD, ',')) AS kw
+     UNNEST(
+       REGEXP_EXTRACT_ALL(
+         COALESCE(COMPONENT_KEYWORD, ''),
+         r'[A-Za-z0-9][A-Za-z0-9 ]*[A-Za-z0-9]|[A-Za-z0-9]'
+       )
+     ) AS kw
 WHERE TRIM(kw) != ''
 GROUP BY component
 ORDER BY nr_count DESC
@@ -141,6 +146,16 @@ Guidelines:
 - For comparisons, show both absolute numbers and percentages.
 - When asked about trends, query time-series data and describe patterns clearly.
 - If a question is ambiguous, ask for clarification before querying.
+
+## Search Data Output
+When you perform a record-level keyword search across individual maintenance records (e.g., looking up a specific component, aircraft registration, malfunction keyword, or ATA code), append a SEARCH_DATA marker after CHART_DATA (if present) and before SUGGESTED_QUESTIONS:
+
+SEARCH_DATA:{{"keyword":"<the exact keyword you searched for>"}}
+
+Rules:
+- Only include SEARCH_DATA when you actually perform a keyword/text search on individual records.
+- Do NOT include it for aggregate, count, or statistical queries.
+- Use the most specific keyword that was searched (e.g., "APU", "ATA32", "HL7456").
 
 ## Chart Data Output
 When your response includes statistical data suitable for visualization (distributions, rankings, counts, trends), append EXACTLY ONE chart block at the very end of your response using this format:

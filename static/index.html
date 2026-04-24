@@ -113,6 +113,18 @@
     /* ── Chat panel ───────────────────────────────────────── */
     #panel-chat { height: calc(100vh - 56px); padding: 0; }
     .chat-container { display: flex; flex-direction: column; height: 100%; }
+    .chat-header { display: flex; align-items: center; justify-content: space-between;
+                   padding: 10px 20px; background: var(--surface);
+                   border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .chat-header-title { font-size: 13px; font-weight: 600; color: var(--muted); }
+    .chat-clear-btn { padding: 4px 12px; background: transparent;
+                      border: 1px solid var(--border); border-radius: var(--radius);
+                      color: var(--muted); font-size: 11px; cursor: pointer;
+                      transition: color .15s, border-color .15s; }
+    .chat-clear-btn:hover { color: var(--danger); border-color: var(--danger); }
+    .chat-restored-notice { padding: 6px 20px; font-size: 11px; color: var(--muted);
+                            background: rgba(88,166,255,.06); border-bottom: 1px solid var(--border);
+                            text-align: center; }
     .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex;
                      flex-direction: column; gap: 12px; }
     .message { display: flex; gap: 10px; max-width: 80%; }
@@ -238,6 +250,13 @@
     .chat-kv-table tr:hover .ckv-key { background: rgba(88,166,255,.08); }
     .chat-kv-table tr:hover .ckv-val { background: rgba(88,166,255,.04); }
 
+    /* ── Chat search results ──────────────────────────────── */
+    .chat-search-wrap { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .chat-search-label { font-size: 11px; font-weight: 600; color: var(--accent2);
+                         text-transform: uppercase; letter-spacing: .5px; margin-bottom: 8px; }
+    .chat-search-wrap .table-wrap { max-height: 280px; overflow: auto;
+                                    border-radius: var(--radius); }
+
     /* ── Loading spinner ──────────────────────────────────── */
     .spinner { display: inline-block; width: 16px; height: 16px;
                border: 2px solid var(--border); border-top-color: var(--accent);
@@ -256,6 +275,23 @@
     .error-msg { color: var(--danger); background: rgba(248,81,73,.1);
                  border: 1px solid rgba(248,81,73,.3); border-radius: var(--radius);
                  padding: 10px 14px; font-size: 13px; }
+
+    /* ── Search bar ───────────────────────────────────────── */
+    .search-bar { display: flex; align-items: center; gap: 8px; }
+    .search-input { flex: 1; max-width: 420px; background: var(--surface2);
+                    border: 1px solid var(--border); border-radius: var(--radius);
+                    padding: 8px 12px; color: var(--text); font-size: 13px;
+                    outline: none; transition: border-color .2s; }
+    .search-input:focus { border-color: var(--accent); }
+    .search-result-info { color: var(--muted); font-size: 12px; margin-left: 4px; }
+
+    /* ── Dashboard search results ─────────────────────────── */
+    .dash-search-results { display: none; flex-direction: column; gap: 8px; }
+    .dash-search-results.visible { display: flex; }
+    .dash-search-header { display: flex; align-items: center; justify-content: space-between; }
+    .dash-search-title { font-size: 13px; font-weight: 600; color: var(--muted);
+                         text-transform: uppercase; letter-spacing: .5px; }
+    .dash-search-count { font-size: 12px; color: var(--accent); }
   </style>
 </head>
 <body>
@@ -294,6 +330,27 @@
           <div class="panel-sub">Live data from <code>aircraft_dummy</code></div>
         </div>
         <button class="refresh-btn" onclick="loadDashboard()">&#8635; Refresh</button>
+      </div>
+      <div class="search-bar">
+        <input type="text" id="dash-search-input" class="search-input"
+               placeholder="키워드로 정비 기록 검색… (예: APU, ATA32, HL7456)"
+               onkeydown="if(event.key==='Enter') doDashboardSearch()" />
+        <button class="btn" onclick="doDashboardSearch()">&#128269; 검색</button>
+        <button class="btn" id="dash-btn-clear" onclick="clearDashboardSearch()" style="display:none">&#10005; Clear</button>
+        <span id="dash-search-info" class="search-result-info"></span>
+      </div>
+      <div id="dash-search-error" class="error-msg" style="display:none"></div>
+      <div id="dash-search-results" class="dash-search-results">
+        <div class="dash-search-header">
+          <span class="dash-search-title">&#128269; 검색 결과</span>
+          <span id="dash-search-count" class="dash-search-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead id="dash-result-head"></thead>
+            <tbody id="dash-result-body"></tbody>
+          </table>
+        </div>
       </div>
       <div class="kpi-table-wrap">
         <table>
@@ -337,6 +394,14 @@
         </div>
         <button class="refresh-btn" onclick="loadTable()">&#8635; Refresh</button>
       </div>
+      <div class="search-bar">
+        <input type="text" id="search-input" class="search-input"
+               placeholder="Search across all columns…"
+               onkeydown="if(event.key==='Enter') doSearch()" />
+        <button class="btn" onclick="doSearch()">&#128269; Search</button>
+        <button class="btn" id="btn-clear-search" onclick="clearSearch()" style="display:none">&#10005; Clear</button>
+        <span id="search-result-info" class="search-result-info"></span>
+      </div>
       <div id="table-error" class="error-msg" style="display:none"></div>
       <div class="table-wrap">
         <table>
@@ -354,6 +419,13 @@
     <!-- Chat panel -->
     <div id="panel-chat" class="panel">
       <div class="chat-container">
+        <div class="chat-header">
+          <span class="chat-header-title">&#129302; AI 채팅</span>
+          <button class="chat-clear-btn" onclick="clearChatHistory()">&#128465; 대화 초기화</button>
+        </div>
+        <div id="chat-restored-notice" class="chat-restored-notice" style="display:none">
+          이전 대화 내역을 불러왔습니다.
+        </div>
         <div id="chat-messages" class="chat-messages">
           <div class="message agent">
             <div class="avatar">&#129302;</div>
@@ -514,6 +586,27 @@ async function loadDashboard() {
 // ── Data table ─────────────────────────────────────────────────────────────
 let tableOffset = 0;
 const PAGE_SIZE = 50;
+let searchMode = false;
+
+function renderTableRows(rows) {
+  if (!rows.length) {
+    document.getElementById('table-head').innerHTML = '';
+    document.getElementById('table-body').innerHTML =
+      '<tr><td colspan="99" style="text-align:center;color:var(--muted);padding:24px">No data found</td></tr>';
+    return;
+  }
+  const cols = Object.keys(rows[0]);
+  document.getElementById('table-head').innerHTML =
+    '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  document.getElementById('table-body').innerHTML = rows.map(row =>
+    '<tr>' + cols.map(c => {
+      const v = row[c];
+      if (c.toLowerCase() === 'status' && v)
+        return `<td><span class="status ${v.toLowerCase()}">${v}</span></td>`;
+      return `<td title="${v ?? ''}">${v ?? ''}</td>`;
+    }).join('') + '</tr>'
+  ).join('');
+}
 
 async function loadTable() {
   const errEl = document.getElementById('table-error');
@@ -522,36 +615,56 @@ async function loadTable() {
     const res = await fetch(`/api/data/table?limit=${PAGE_SIZE}&offset=${tableOffset}`);
     const data = await res.json();
     if (data.detail) throw new Error(data.detail);
-
-    const rows = data.rows;
-    if (!rows.length) { document.getElementById('table-body').innerHTML = '<tr><td colspan="99" style="text-align:center;color:var(--muted);padding:24px">No data found</td></tr>'; return; }
-
-    const cols = Object.keys(rows[0]);
-    document.getElementById('table-head').innerHTML =
-      '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
-
-    document.getElementById('table-body').innerHTML = rows.map(row =>
-      '<tr>' + cols.map(c => {
-        const v = row[c];
-        if (c.toLowerCase() === 'status' && v) {
-          return `<td><span class="status ${v.toLowerCase()}">${v}</span></td>`;
-        }
-        return `<td title="${v ?? ''}">${v ?? ''}</td>`;
-      }).join('') + '</tr>'
-    ).join('');
-
+    renderTableRows(data.rows);
     const page = Math.floor(tableOffset / PAGE_SIZE) + 1;
     document.getElementById('page-info').textContent = `Page ${page}`;
     document.getElementById('btn-prev').disabled = tableOffset === 0;
-    document.getElementById('btn-next').disabled = rows.length < PAGE_SIZE;
+    document.getElementById('btn-next').disabled = data.rows.length < PAGE_SIZE;
   } catch (e) {
     errEl.textContent = 'Failed to load table: ' + e.message;
     errEl.style.display = 'block';
   }
 }
 
-function prevPage() { if (tableOffset >= PAGE_SIZE) { tableOffset -= PAGE_SIZE; loadTable(); } }
-function nextPage() { tableOffset += PAGE_SIZE; loadTable(); }
+function prevPage() { if (!searchMode && tableOffset >= PAGE_SIZE) { tableOffset -= PAGE_SIZE; loadTable(); } }
+function nextPage() { if (!searchMode) { tableOffset += PAGE_SIZE; loadTable(); } }
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) { clearSearch(); return; }
+  searchMode = true;
+  document.getElementById('btn-clear-search').style.display = '';
+  document.getElementById('btn-prev').style.display = 'none';
+  document.getElementById('btn-next').style.display = 'none';
+  document.getElementById('page-info').style.display = 'none';
+  const infoEl = document.getElementById('search-result-info');
+  infoEl.textContent = 'Searching…';
+  const errEl = document.getElementById('table-error');
+  errEl.style.display = 'none';
+  try {
+    const res = await fetch(`/api/data/search?q=${encodeURIComponent(q)}&limit=100`);
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+    renderTableRows(data.rows);
+    infoEl.textContent = `${data.total} result${data.total !== 1 ? 's' : ''} for "${data.query}"`;
+  } catch (e) {
+    errEl.textContent = 'Search failed: ' + e.message;
+    errEl.style.display = 'block';
+    infoEl.textContent = '';
+  }
+}
+
+function clearSearch() {
+  searchMode = false;
+  document.getElementById('search-input').value = '';
+  document.getElementById('btn-clear-search').style.display = 'none';
+  document.getElementById('btn-prev').style.display = '';
+  document.getElementById('btn-next').style.display = '';
+  document.getElementById('page-info').style.display = '';
+  document.getElementById('search-result-info').textContent = '';
+  tableOffset = 0;
+  loadTable();
+}
 
 // ── Chat text formatter ────────────────────────────────────────────────────
 function escHtml(s) {
@@ -685,7 +798,63 @@ let sessionId = null;
 let isThinking = false;
 let chatChartCounter = 0;
 
-function appendMessage(role, text, chartData = null) {
+// ── Chat history persistence ───────────────────────────────────────────────
+const LS_SESSION = 'aircraft_session_id';
+const LS_HISTORY = 'aircraft_chat_history';
+let chatHistory = [];
+
+function saveChatHistory() {
+  try {
+    localStorage.setItem(LS_SESSION, sessionId || '');
+    // Limit search rows stored to avoid quota issues
+    const toSave = chatHistory.map(m => ({
+      role: m.role, text: m.text, chartData: m.chartData,
+      searchData: m.searchData
+        ? { query: m.searchData.query, rows: m.searchData.rows?.slice(0, 30) }
+        : null,
+    }));
+    localStorage.setItem(LS_HISTORY, JSON.stringify(toSave));
+  } catch (e) { /* quota exceeded — ignore */ }
+}
+
+function clearChatHistory() {
+  chatHistory = [];
+  sessionId = null;
+  localStorage.removeItem(LS_SESSION);
+  localStorage.removeItem(LS_HISTORY);
+  document.getElementById('chat-restored-notice').style.display = 'none';
+  const wrap = document.getElementById('chat-messages');
+  wrap.innerHTML = `<div class="message agent">
+    <div class="avatar">&#129302;</div>
+    <div class="bubble">안녕하세요! 저는 항공기 인텔리전스 어시스턴트입니다. <strong>aircraft_dummy</strong> BigQuery 데이터셋에 직접 접근할 수 있습니다.<br><br>
+    항공기 현황 분석, 노선 분석, 기종별 분포, 운항사 정보 등 항공 데이터에 대해 무엇이든 질문해 보세요. 어떻게 도와드릴까요?</div>
+  </div>`;
+}
+
+function restoreChatHistory() {
+  const savedSession = localStorage.getItem(LS_SESSION);
+  if (savedSession) sessionId = savedSession;
+
+  const raw = localStorage.getItem(LS_HISTORY);
+  if (!raw) return;
+  try {
+    const history = JSON.parse(raw);
+    if (!history.length) return;
+    chatHistory = history;
+    const wrap = document.getElementById('chat-messages');
+    wrap.innerHTML = '';
+    history.forEach(m => appendMessageDOM(m.role, m.text, m.chartData, m.searchData));
+    document.getElementById('chat-restored-notice').style.display = '';
+  } catch (e) { /* corrupted data — ignore */ }
+}
+
+function appendMessage(role, text, chartData = null, searchData = null) {
+  chatHistory.push({ role, text, chartData, searchData });
+  saveChatHistory();
+  return appendMessageDOM(role, text, chartData, searchData);
+}
+
+function appendMessageDOM(role, text, chartData = null, searchData = null) {
   const wrap = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = 'message ' + role;
@@ -697,15 +866,32 @@ function appendMessage(role, text, chartData = null) {
     chartId = 'chat-chart-' + (++chatChartCounter);
     const titleHtml = chartData.title
       ? `<div class="chat-chart-title">${chartData.title}</div>` : '';
-
     chartHtml = `<div class="chat-chart-wrap">${titleHtml}<canvas id="${chartId}"></canvas></div>`;
+  }
+
+  let searchHtml = '';
+  if (searchData && role === 'agent' && searchData.rows?.length) {
+    const cols = Object.keys(searchData.rows[0]);
+    const rowsHtml = searchData.rows.map(row =>
+      '<tr>' + cols.map(c => `<td title="${escHtml(String(row[c] ?? ''))}">${escHtml(String(row[c] ?? ''))}</td>`).join('') + '</tr>'
+    ).join('');
+    searchHtml = `
+      <div class="chat-search-wrap">
+        <div class="chat-search-label">&#128269; 검색 결과 &mdash; &ldquo;${escHtml(searchData.query)}&rdquo; (${searchData.rows.length}건)</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>${cols.map(c => `<th>${c}</th>`).join('')}</tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
   }
 
   const bodyHtml = role === 'agent'
     ? formatAgentText(text)
     : escHtml(text).replace(/\n/g, '<br>');
   div.innerHTML = `<div class="avatar">${avatar}</div>
-    <div class="bubble">${bodyHtml}${chartHtml}</div>`;
+    <div class="bubble">${bodyHtml}${chartHtml}${searchHtml}</div>`;
   wrap.appendChild(div);
   wrap.scrollTop = wrap.scrollHeight;
 
@@ -784,6 +970,12 @@ async function sendMessage() {
   document.getElementById('send-btn').disabled = true;
 
   try {
+    // /api/data/search를 /api/chat과 병렬로 호출
+    const keyword = rawText.trim();
+    const directSearchPromise = fetch(`/api/data/search?q=${encodeURIComponent(keyword)}&limit=50`)
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null);
+
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -793,7 +985,20 @@ async function sendMessage() {
     if (data.detail) throw new Error(data.detail);
     sessionId = data.session_id;
     removeThinking();
-    appendMessage('agent', data.response, data.chart_data || null);
+
+    // AI 제공 검색 결과 우선, 없으면 /api/data/search 결과 사용
+    let searchData = (data.search_rows?.length)
+      ? { query: data.search_query || keyword, rows: data.search_rows }
+      : null;
+
+    if (!searchData) {
+      const direct = await directSearchPromise;
+      if (direct?.rows?.length) {
+        searchData = { query: keyword, rows: direct.rows };
+      }
+    }
+
+    appendMessage('agent', data.response, data.chart_data || null, searchData);
     if (data.suggested_questions?.length) {
       updateSuggestions(data.suggested_questions);
     }
@@ -875,8 +1080,63 @@ function autoResize(el) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 
+// ── Dashboard search ───────────────────────────────────────────────────────
+async function doDashboardSearch() {
+  const q = document.getElementById('dash-search-input').value.trim();
+  if (!q) { clearDashboardSearch(); return; }
+
+  const infoEl   = document.getElementById('dash-search-info');
+  const errEl    = document.getElementById('dash-search-error');
+  const resultsEl = document.getElementById('dash-search-results');
+  const countEl  = document.getElementById('dash-search-count');
+
+  infoEl.textContent = '검색 중…';
+  errEl.style.display = 'none';
+  document.getElementById('dash-btn-clear').style.display = '';
+
+  try {
+    const res  = await fetch(`/api/data/search?q=${encodeURIComponent(q)}&limit=100`);
+    const data = await res.json();
+    if (data.detail) throw new Error(data.detail);
+
+    const rows = data.rows;
+    infoEl.textContent = '';
+    countEl.textContent = `${data.total}건 검색됨 — "${data.query}"`;
+
+    if (!rows.length) {
+      document.getElementById('dash-result-head').innerHTML = '';
+      document.getElementById('dash-result-body').innerHTML =
+        '<tr><td colspan="99" style="text-align:center;color:var(--muted);padding:24px">결과 없음</td></tr>';
+    } else {
+      const cols = Object.keys(rows[0]);
+      document.getElementById('dash-result-head').innerHTML =
+        '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+      document.getElementById('dash-result-body').innerHTML = rows.map(row =>
+        '<tr>' + cols.map(c => `<td title="${row[c] ?? ''}">${row[c] ?? ''}</td>`).join('') + '</tr>'
+      ).join('');
+    }
+    resultsEl.classList.add('visible');
+  } catch (e) {
+    errEl.textContent = '검색 실패: ' + e.message;
+    errEl.style.display = 'block';
+    infoEl.textContent = '';
+  }
+}
+
+function clearDashboardSearch() {
+  document.getElementById('dash-search-input').value = '';
+  document.getElementById('dash-btn-clear').style.display = 'none';
+  document.getElementById('dash-search-info').textContent = '';
+  document.getElementById('dash-search-error').style.display = 'none';
+  document.getElementById('dash-search-results').classList.remove('visible');
+  document.getElementById('dash-result-head').innerHTML = '';
+  document.getElementById('dash-result-body').innerHTML = '';
+  document.getElementById('dash-search-count').textContent = '';
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 loadDashboard();
+restoreChatHistory();
 </script>
 </body>
 </html>

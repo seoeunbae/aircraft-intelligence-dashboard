@@ -45,6 +45,79 @@ def run_query(sql: str) -> list[dict]:
 
 FULL_TABLE = f"`{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}`"
 
+def _extract_aviation_keywords(sentence: str) -> list[str]:
+    """Gemini를 이용해 문장에서 항공 정비 관련 키워드를 추출한다."""
+    import json
+    from google import genai as _genai
+
+    client = _genai.Client()
+    prompt = (
+        "Extract aviation/aircraft maintenance related english keywords from the following text.\n"
+        "Return ONLY a JSON array of strings, no explanation, no markdown fences.\n"
+        "Focus on: component names (APU, engine, hydraulic pump, etc.), ATA , "
+        "aircraft types (B737, A320), malfunction types, operator codes.\n"
+        "Limit to the most relevant terms (max 5).\n"
+        "If the input is already a single short keyword, return it as-is in the array.\n\n"
+        f"Input: {sentence}"
+    )
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        text = response.text.strip()
+        if "```" in text:
+            text = text.split("```")[1].lstrip("json").strip()
+        keywords = json.loads(text)
+        cleaned = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
+        return cleaned if cleaned else [sentence]
+
+    except Exception:
+        return [sentence]
+
+
+def _search_sync(kw: str, limit: int = 100) -> list[dict]:
+    keywords = _extract_aviation_keywords(kw)
+
+    seen: dict[str, dict] = {}
+    per_limit = max(limit // max(len(keywords), 1), 20)
+
+    for keyword in keywords:
+        escaped = keyword.strip().replace("'", "\\'")
+        if not escaped:
+            continue
+        sql = f"""
+        SELECT *
+        FROM {FULL_TABLE}
+        WHERE
+          SEARCH(MALFUNCTION, '{escaped}')
+          OR SEARCH(CORRECTIVE_ACTION, '{escaped}')
+          OR SEARCH(NR_WORKORDER_NAME, '{escaped}')
+          OR LOWER(AC_TYPE)  LIKE LOWER('%{escaped}%')
+          OR LOWER(AC_NO)    LIKE LOWER('%{escaped}%')
+          OR LOWER(AMP)      LIKE LOWER('%{escaped}%')
+          OR LOWER(ATA_CODE) LIKE LOWER('%{escaped}%')
+          OR LOWER(MSG_NO)   LIKE LOWER('%{escaped}%')
+          OR EXISTS (
+              SELECT 1
+              FROM UNNEST(SPLIT(COALESCE(COMPONENT_KEYWORD, ''), ',')) AS _kw
+              WHERE TRIM(LOWER(_kw)) LIKE LOWER('%{escaped}%')
+          )
+        LIMIT {per_limit}
+        """
+        rows = run_query(sql)
+        for row in rows:
+            serialized = {
+                k: (str(v) if not isinstance(v, (int, float, bool, str, type(None))) else v)
+                for k, v in row.items()
+            }
+            key = serialized.get("ID") or serialized.get("NR_NUMBER") or str(serialized)
+            if key not in seen:
+                seen[key] = serialized
+
+    results = list(seen.values())[:limit]
+    return results
+
 # ── ADK agent session management ─────────────────────────────────────────────
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -85,6 +158,8 @@ class ChatResponse(BaseModel):
     response: str
     chart_data: Optional[dict] = None
     suggested_questions: Optional[list[str]] = None
+    search_rows: Optional[list[dict]] = None
+    search_query: Optional[str] = None
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 @app.post("/api/chat", response_model=ChatResponse)
@@ -120,41 +195,59 @@ async def chat(req: ChatRequest):
     if not response_text:
         response_text = "응답을 생성하지 못했습니다. 다시 시도해 주세요."
 
+    # Peel special markers from the end of the response (order: SQ → SD → CD)
+    text = response_text
+
+    sq_raw = sd_raw = cd_raw = None
+    if "SUGGESTED_QUESTIONS:" in text:
+        text, sq_raw = text.rsplit("SUGGESTED_QUESTIONS:", 1)
+        text = text.rstrip()
+        sq_raw = sq_raw.strip().split("\n")[0]
+
+    if "SEARCH_DATA:" in text:
+        text, sd_raw = text.rsplit("SEARCH_DATA:", 1)
+        text = text.rstrip()
+        sd_raw = sd_raw.strip().split("\n")[0]
+
+    if "CHART_DATA:" in text:
+        text, cd_raw = text.rsplit("CHART_DATA:", 1)
+        text = text.rstrip()
+        cd_raw = cd_raw.strip().split("\n")[0]
+
+    response_text = text.strip()
+
     chart_data = None
-    if "CHART_DATA:" in response_text:
-        parts = response_text.split("CHART_DATA:", 1)
-        response_text = parts[0].strip()
-        remainder = parts[1].strip()
-        # SUGGESTED_QUESTIONS may follow CHART_DATA on a new line
-        if "SUGGESTED_QUESTIONS:" in remainder:
-            chart_part, sq_part = remainder.split("SUGGESTED_QUESTIONS:", 1)
-            remainder = chart_part.strip()
-            suggested_raw = sq_part.strip()
-        else:
-            suggested_raw = None
+    if cd_raw:
         try:
-            chart_data = json.loads(remainder)
+            chart_data = json.loads(cd_raw)
         except Exception:
             pass
-    else:
-        suggested_raw = None
+
+    search_rows = None
+    search_query = None
+    if sd_raw:
+        try:
+            meta = json.loads(sd_raw)
+            kw = meta.get("keyword", "").strip()
+            if kw:
+                search_query = kw
+                search_rows = await asyncio.to_thread(_search_sync, kw, 100)
+        except Exception:
+            pass
 
     suggested_questions = None
-    if "SUGGESTED_QUESTIONS:" in response_text:
-        parts = response_text.split("SUGGESTED_QUESTIONS:", 1)
-        response_text = parts[0].strip()
-        suggested_raw = parts[1].strip()
-    if suggested_raw:
+    if sq_raw:
         try:
-            suggested_questions = json.loads(suggested_raw)
+            suggested_questions = json.loads(sq_raw)
         except Exception:
             pass
-
     return ChatResponse(
         session_id=session_id,
         response=response_text,
         chart_data=chart_data,
         suggested_questions=suggested_questions,
+        search_rows=search_rows,
+        search_query=search_query,
     )
 
 
@@ -267,59 +360,13 @@ async def data_table(limit: int = 50, offset: int = 0):
 
 
 @app.get("/api/data/search")
-async def data_search(q: Optional[str] = None, limit: int = 100):
-    """Full-text search across all columns. Returns overall statistics when q is omitted."""
+async def data_search(q: str, limit: int = 100):
+    """Full-text search across all columns."""
     if not q or not q.strip():
-        try:
-            stats_sql = f"""
-            SELECT
-                COUNT(*)                  AS total_records,
-                COUNT(DISTINCT AC_NO)     AS total_aircraft,
-                COUNT(DISTINCT AC_TYPE)   AS aircraft_types,
-                COUNT(DISTINCT AMP)       AS operators,
-                COUNT(DISTINCT ATA_CODE)  AS ata_codes,
-                MIN(NR_REQUEST_DATE)      AS earliest_date,
-                MAX(NR_REQUEST_DATE)      AS latest_date
-            FROM {FULL_TABLE}
-            """
-            rows = await asyncio.to_thread(run_query, stats_sql)
-            summary = rows[0] if rows else {}
-            cleaned = {
-                k: (str(v) if not isinstance(v, (int, float, bool, str, type(None))) else v)
-                for k, v in summary.items()
-            }
-            return {"summary": cleaned, "query": None}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-    kw = q.strip().replace("'", "\\'")
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
     try:
-        sql = f"""
-        SELECT *
-        FROM {FULL_TABLE}
-        WHERE
-          SEARCH(MALFUNCTION, '{kw}')
-          OR SEARCH(CORRECTIVE_ACTION, '{kw}')
-          OR SEARCH(NR_WORKORDER_NAME, '{kw}')
-          OR LOWER(AC_TYPE)  LIKE LOWER('%{kw}%')
-          OR LOWER(AC_NO)    LIKE LOWER('%{kw}%')
-          OR LOWER(AMP)      LIKE LOWER('%{kw}%')
-          OR LOWER(ATA_CODE) LIKE LOWER('%{kw}%')
-          OR LOWER(MSG_NO)   LIKE LOWER('%{kw}%')
-          OR EXISTS (
-              SELECT 1
-              FROM UNNEST(SPLIT(COALESCE(COMPONENT_KEYWORD, ''), ',')) AS _kw
-              WHERE TRIM(LOWER(_kw)) LIKE LOWER('%{kw}%')
-          )
-        LIMIT {limit}
-        """
-        rows = await asyncio.to_thread(run_query, sql)
-        cleaned = [
-            {k: (str(v) if not isinstance(v, (int, float, bool, str, type(None))) else v)
-             for k, v in row.items()}
-            for row in rows
-        ]
-        return {"rows": cleaned, "total": len(cleaned), "query": q}
+        rows = await asyncio.to_thread(_search_sync, q, limit)
+        return {"rows": rows, "total": len(rows), "query": q}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
