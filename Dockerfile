@@ -11,7 +11,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY config.py .
 COPY agent/ agent/
+COPY api/ api/
+COPY db/ db/
 COPY static/ static/
 
 ENV PYTHONUNBUFFERED=1

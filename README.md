@@ -32,16 +32,29 @@ Google ADK + Gemini 2.5 Flash + BigQuery를 기반으로 자연어 질문으로 
 
 ```
 aircraft/
-├── app.py                  # FastAPI 백엔드 (REST API + BQ 클라이언트 + ADK 세션)
+├── app.py                  # FastAPI 진입점 — 라우터·의존성 와이어링만 담당 (25줄)
+├── config.py               # 환경변수 단일 진실 원천 (Settings dataclass)
 ├── adk_runner.py           # CLI용 standalone 에이전트 실행기
-├── agent/
-│   ├── __init__.py
-│   └── agent.py            # ADK Agent 정의 (Gemini + BigQueryToolset + CAA Toolset)
+│
+├── db/                     # 데이터 접근 레이어 — DB 교체 시 이 레이어만 수정
+│   ├── base.py             # DataStore ABC (인터페이스 정의)
+│   ├── bigquery.py         # BigQuery 구현체
+│   └── __init__.py         # create_datastore() 팩토리 (DB_TYPE env로 분기)
+│
+├── api/                    # FastAPI 라우터
+│   ├── chat.py             # POST /api/chat — ADK 세션 관리
+│   └── data.py             # GET  /api/data/* — summary / charts / table / search
+│
+├── agent/                  # ADK 에이전트
+│   ├── prompt.py           # 시스템 프롬프트 팩토리 (build_system_prompt)
+│   ├── agent.py            # Agent 빌더 — config 주입, 하드코딩 없음
+│   └── __init__.py
+│
 ├── static/
 │   ├── index.html          # SPA 프론트엔드
 │   └── chart.min.js        # Chart.js 번들
+│
 ├── Dockerfile              # Cloud Run용 컨테이너 이미지 정의
-├── .dockerignore
 ├── cloudbuild.yaml         # CI/CD — 빌드 → Artifact Registry 푸시 → Cloud Run 배포
 ├── terraform/              # IaC — GCP 인프라 전체 정의
 │   ├── main.tf             # Provider 설정
@@ -55,10 +68,20 @@ aircraft/
 │   ├── iap.tf              # Global HTTPS LB + IAP + Serverless NEG + SSL
 │   └── terraform.tfvars.example
 ├── requirements.txt        # Python 의존성
-├── start.sh                # 로컬 실행 스크립트 (venv 생성 + uvicorn 시작)
 ├── .env.example            # 환경변수 템플릿
 ├── ARCHITECTURE.md         # 아키텍처 상세 문서 + 다이어그램
 └── README.md
+```
+
+### 다른 DB 백엔드 연결 방법
+
+`DataStore` ABC를 구현하는 파일을 `db/` 에 추가하고, `db/__init__.py` 의 팩토리에 분기를 한 줄 추가한 뒤 `.env` 에서 `DB_TYPE` 을 지정하면 됩니다.
+
+```
+# 예: PostgreSQL 백엔드 추가
+db/postgres.py          ← DataStore 서브클래스 구현
+db/__init__.py          ← "postgres" 분기 추가 (1줄)
+.env                    ← DB_TYPE=postgres
 ```
 
 ---
@@ -80,6 +103,10 @@ BIGQUERY_TABLE=aircraft_dummy
 BIGQUERY_REGION=asia-southeast3
 GOOGLE_CLOUD_LOCATION=asia-southeast1
 GOOGLE_GENAI_USE_VERTEXAI=true
+
+# 데이터 백엔드 선택 (기본값: bigquery)
+# 다른 DB를 추가한 경우 db/__init__.py 의 팩토리에 맞게 값을 변경
+DB_TYPE=bigquery
 ```
 
 ### 2. GCP 인증
@@ -263,19 +290,26 @@ terraform output lb_ip_address # DNS 등록용 LB IP
 
 ```
 사용자 (브라우저)
-  → Global HTTPS LB (34-8-37-29.nip.io)
+  → Global HTTPS LB
   → IAP (Google 계정 인증 — 허용된 사용자만 통과)
   → Serverless NEG
   → Cloud Run (ingress: LB 전용)
-  → FastAPI → ADK Runner → Gemini Agent
-                                  ↓
-                            BigQueryToolset
-                                  ↓
-                             BigQuery
-                                  ↓
-                   응답 + CHART_DATA + SUGGESTED_QUESTIONS
-                                  ↓
-                  FastAPI 파싱 → 프론트엔드 렌더링
+  → app.py (FastAPI — 라우터 와이어링)
+       ├─ api/data.py  ──→ db/DataStore (BigQuery / 기타 백엔드)
+       │                        ↓
+       │                   summary / charts / table / search
+       │
+       └─ api/chat.py  ──→ ADK Runner
+                                ↓
+                          agent/agent.py  (Gemini 2.5 Flash)
+                                ↓
+                          BigQueryToolset / CAA Toolset
+                                ↓
+                           BigQuery
+                                ↓
+              응답 + CHART_DATA + SEARCH_DATA + SUGGESTED_QUESTIONS
+                                ↓
+              api/chat.py 파싱 → 프론트엔드 렌더링
 ```
 
 ### 접근 보안
