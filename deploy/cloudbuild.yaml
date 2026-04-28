@@ -31,7 +31,7 @@ steps:
       - '--quiet'
 
 substitutions:
-  _REGION: asia-southeast1
+  _REGION: us-central1
   _REPO: aircraft-dashboard-images
   _SERVICE: aircraft-dashboard
 

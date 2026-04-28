@@ -123,15 +123,26 @@ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 
 ### 3. 서버 실행
 
+**가상환경 세팅 (최초 1회)**
+
 ```bash
-bash start.sh
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-`start.sh`는 자동으로 Python 가상환경을 생성하고, 의존성을 설치한 뒤 서버를 시작합니다.
+**서버 시작 (개발 모드 — 핫 리로드)**
 
+```bash
+make dev
+# 또는 직접 실행:
+uvicorn app:app --host 0.0.0.0 --port 8080 --reload
 ```
-Starting Aircraft Intelligence Dashboard...
-Open: http://localhost:8080
+
+**Docker로 실행**
+
+```bash
+make run
 ```
 
 브라우저에서 `http://localhost:8080`을 열면 대시보드가 표시됩니다.
