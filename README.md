@@ -1,5 +1,379 @@
 # AircraftIQ — Aircraft Intelligence Dashboard
 
+> **Language / 언어**: [English](#english) · [한국어](#한국어)
+
+---
+
+<a name="english"></a>
+## English
+
+A web dashboard that analyzes aircraft Non-Routine (NR) maintenance records using AI.  
+Built on Google ADK + Gemini 2.5 Flash + BigQuery — query and visualize maintenance data through natural language.
+
+---
+
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Dashboard** | Real-time KPI metrics (total NRs, aircraft count, aircraft types, operators) + 4 distribution charts |
+| **Data Table** | Paginated browsing of the `aircraft_dummy` table |
+| **AI Chat** | Natural language conversation with a Gemini 2.5 Flash agent — auto SQL generation and result analysis |
+| **Inline Charts** | Automatic Bar / Doughnut / Line chart rendering inside agent responses |
+| **Suggested Questions** | 3 context-aware follow-up questions auto-generated after each response |
+| **Equipment Analysis Mode** | Deep-dive analysis for specific equipment such as APU, landing gear, engines |
+
+---
+
+### Tech Stack
+
+- **Frontend**: Vanilla HTML/CSS/JS + Chart.js v4
+- **Backend**: Python 3.11 / FastAPI / Uvicorn
+- **AI Agent**: Google ADK (≥1.23) + Gemini 2.5 Flash
+- **Database**: Google BigQuery (`cloud-cycle-pj.mdas-dataset.aircraft_dummy`)
+- **Cloud**: Google Cloud Platform (Vertex AI)
+
+---
+
+### Project Structure
+
+```
+aircraft/
+├── app.py                  # FastAPI entry point — router & dependency wiring only (25 lines)
+├── config.py               # Single source of truth for env vars (Settings dataclass)
+├── adk_runner.py           # Standalone CLI agent runner
+│
+├── db/                     # Data access layer — swap DB by modifying only this layer
+│   ├── base.py             # DataStore ABC (interface definition)
+│   ├── bigquery.py         # BigQuery implementation
+│   └── __init__.py         # create_datastore() factory (branched by DB_TYPE env var)
+│
+├── api/                    # FastAPI routers
+│   ├── chat.py             # POST /api/chat — ADK session management
+│   └── data.py             # GET  /api/data/* — summary / charts / table / search
+│
+├── agent/                  # ADK agent
+│   ├── prompt.py           # System prompt factory (build_system_prompt)
+│   ├── agent.py            # Agent builder — config-injected, no hardcoding
+│   └── __init__.py
+│
+├── static/
+│   ├── index.html          # SPA frontend
+│   └── chart.min.js        # Chart.js bundle
+│
+├── Dockerfile              # Container image for Cloud Run
+├── cloudbuild.yaml         # CI/CD — build → push to Artifact Registry → deploy to Cloud Run
+├── terraform/              # IaC — full GCP infrastructure definition
+│   ├── main.tf
+│   ├── variables.tf
+│   ├── outputs.tf
+│   ├── apis.tf
+│   ├── iam.tf
+│   ├── artifact_registry.tf
+│   ├── bigquery.tf
+│   ├── cloud_run.tf
+│   ├── iap.tf
+│   └── terraform.tfvars.example
+├── requirements.txt
+├── .env.example
+├── ARCHITECTURE.md
+└── README.md
+```
+
+#### Plugging in a Different DB Backend
+
+Add a file implementing the `DataStore` ABC under `db/`, add one branch line in `db/__init__.py`, and set `DB_TYPE` in `.env`.
+
+```
+# Example: adding a PostgreSQL backend
+db/postgres.py          ← DataStore subclass implementation
+db/__init__.py          ← add "postgres" branch (1 line)
+.env                    ← DB_TYPE=postgres
+```
+
+---
+
+### Quick Start
+
+#### 1. Configure Environment Variables
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in your GCP project details:
+
+```dotenv
+GOOGLE_CLOUD_PROJECT=cloud-cycle-pj
+BIGQUERY_DATASET=mdas-dataset
+BIGQUERY_TABLE=aircraft_dummy
+BIGQUERY_REGION=asia-southeast3
+GOOGLE_CLOUD_LOCATION=asia-southeast1
+GOOGLE_GENAI_USE_VERTEXAI=true
+
+# Data backend selection (default: bigquery)
+DB_TYPE=bigquery
+```
+
+#### 2. GCP Authentication
+
+```bash
+gcloud auth application-default login
+```
+
+Or with a service account key:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+```
+
+#### 3. Run the Server
+
+**Virtual environment setup (first time only)**
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+**Start server (dev mode — hot reload)**
+
+```bash
+make dev
+# or directly:
+uvicorn app:app --host 0.0.0.0 --port 8080 --reload
+```
+
+**Run with Docker**
+
+```bash
+make run
+```
+
+Open `http://localhost:8080` in your browser to view the dashboard.
+
+#### 4. CLI Mode (optional)
+
+Chat with the agent directly in the terminal without starting the web server:
+
+```bash
+source venv/bin/activate
+python adk_runner.py
+```
+
+```
+=== Aircraft Intelligence Agent ===
+Type your question (or 'quit' to exit)
+
+You: Show me the top 10 ATA codes by NR count
+Agent: ...
+```
+
+---
+
+### GCP Deployment (Terraform + Cloud Run)
+
+#### Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.5
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) (`gcloud`)
+- Docker
+- Owner or Editor permission on the GCP project
+
+#### Resources Managed by Terraform
+
+| File | Resources Created |
+|------|-------------------|
+| `apis.tf` | Enables Cloud Run, BigQuery, Artifact Registry, Cloud Build, IAP, Compute APIs |
+| `iam.tf` | Service account + BigQuery & Cloud Run IAM bindings |
+| `artifact_registry.tf` | Docker image repository |
+| `bigquery.tf` | `mdas-dataset` dataset + `aircraft_dummy` table schema |
+| `cloud_run.tf` | Cloud Run v2 service (LB-only ingress, scaling, health checks, env vars) |
+| `iap.tf` | Global HTTPS LB + Serverless NEG + IAP OAuth client + SSL certificate |
+
+#### Deployment Steps
+
+**Step 1 — Set variables**
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars`:
+
+```hcl
+project_id          = "your-gcp-project-id"
+region              = "us-central1"
+iap_support_email   = "admin@your-org.com"
+iap_allowed_members = ["user:admin@your-org.com"]
+# domain = "dashboard.example.com"  # omit if no custom domain (nip.io auto-used)
+```
+
+**Step 2 — Create Artifact Registry first**
+
+```bash
+terraform init
+terraform apply -target=google_artifact_registry_repository.docker
+```
+
+**Step 3 — Build & push Docker image**
+
+```bash
+cd ..
+gcloud auth configure-docker us-central1-docker.pkg.dev
+docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT/aircraft-dashboard-images/aircraft-dashboard:latest .
+docker push us-central1-docker.pkg.dev/YOUR_PROJECT/aircraft-dashboard-images/aircraft-dashboard:latest
+```
+
+**Step 4 — Create LB static IP first (for nip.io domain calculation)**
+
+```bash
+cd terraform
+terraform apply -target=google_compute_global_address.lb_ip
+```
+
+**Step 5 — Deploy full infrastructure**
+
+```bash
+terraform apply
+```
+
+**Step 6 — Get access URL**
+
+```bash
+terraform output iap_url       # IAP-protected URL (for actual access)
+terraform output lb_ip_address # LB IP for DNS registration
+```
+
+> **SSL certificate**: After first deployment, certificate provisioning takes 10–30 minutes.  
+> Check `ACTIVE` status with `gcloud compute ssl-certificates describe aircraft-dashboard-cert --global` before accessing.
+
+> **Existing IAP brand**: If the project already has an IAP brand, import it:  
+> `terraform import google_iap_brand.project_brand projects/PROJECT_NUMBER/brands/PROJECT_NUMBER`
+
+#### CI/CD (Cloud Build)
+
+Connect `cloudbuild.yaml` to a Cloud Build trigger to auto-build and deploy on every code push:
+
+```
+Code Push
+  → Cloud Build trigger
+  → Docker image build
+  → Push to Artifact Registry (COMMIT_SHA + latest tags)
+  → Auto-deploy to Cloud Run
+```
+
+---
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/` | SPA entry point |
+| `POST` | `/api/chat` | AI agent conversation |
+| `GET` | `/api/data/summary` | KPI aggregation (total NRs, aircraft count, etc.) |
+| `GET` | `/api/data/charts` | Top-10 distribution data for charts |
+| `GET` | `/api/data/table` | Paginated table (`?limit=50&offset=0`) |
+| `GET` | `/api/data/search` | Full-text search (`?q=keyword`) |
+
+---
+
+### AI Agent Analysis Examples
+
+**General Analysis**
+- "Show the distribution of aircraft types as a pie chart"
+- "Top 10 ATA codes by NR count"
+- "Monthly NR occurrence trend analysis"
+
+**Equipment Deep Dive**
+- "Analyze APU-related NR records and show defect patterns by aircraft type"
+- "Show the full NR status and monthly trend for ATA 32 (landing gear)"
+- "Find aircraft registration numbers with the highest repeat NR occurrence for engine-related issues"
+
+---
+
+### Architecture
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed diagrams and data flow.
+
+Key flow:
+
+```
+User (Browser)
+  → Global HTTPS LB
+  → IAP (Google account auth — only allowed users pass)
+  → Serverless NEG
+  → Cloud Run (LB-only ingress)
+  → app.py (FastAPI — router wiring)
+       ├─ api/data.py  ──→ db/DataStore (BigQuery / other backends)
+       │                        ↓
+       │                   summary / charts / table / search
+       │
+       └─ api/chat.py  ──→ ADK Runner
+                                ↓
+                          agent/agent.py  (Gemini 2.5 Flash)
+                                ↓
+                          BigQueryToolset / CAA Toolset
+                                ↓
+                           BigQuery
+                                ↓
+              Response + CHART_DATA + SEARCH_DATA + SUGGESTED_QUESTIONS
+                                ↓
+              api/chat.py parsing → frontend rendering
+```
+
+#### Access Security
+
+| Component | Role |
+|-----------|------|
+| **IAP (Identity-Aware Proxy)** | Google account auth — only users in `iap_allowed_members` can access |
+| **Global HTTPS LB** | SSL termination + HTTP→HTTPS redirect |
+| **Cloud Run ingress restriction** | `INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER` — blocks direct access bypassing LB |
+| **nip.io SSL** | Google-managed SSL certificate auto-provisioned without a custom domain |
+
+---
+
+### Dependencies
+
+```
+google-adk>=1.23.0
+google-cloud-bigquery>=3.11.0
+google-auth>=2.22.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+google-cloud-aiplatform>=1.38.0
+pydantic>=2.4.0
+```
+
+---
+
+### BigQuery Table Schema
+
+`cloud-cycle-pj.mdas-dataset.aircraft_dummy`
+
+| Column | Description |
+|--------|-------------|
+| `ID` | Record identifier |
+| `NR_NUMBER` | Non-routine work order number |
+| `MALFUNCTION` | Defect description |
+| `CORRECTIVE_ACTION` | Corrective action taken |
+| `NR_REQUEST_DATE` | NR occurrence date |
+| `AC_TYPE` | Aircraft type (e.g. B737, A320) |
+| `AC_NO` | Aircraft registration number |
+| `MSG_NO` | Message number |
+| `AMP` | Operator / maintenance program |
+| `COMPONENT_KEYWORD` | Component keywords (comma-separated, e.g. "ENGINE,APU") |
+| `ATA_CODE` | ATA chapter code |
+| `NR_WORKORDER_NAME` | Work order name |
+
+---
+
+<a name="한국어"></a>
+## 한국어
+
 항공기 비정형 정비(NR) 기록을 AI로 분석하는 웹 대시보드입니다.  
 Google ADK + Gemini 2.5 Flash + BigQuery를 기반으로 자연어 질문으로 정비 데이터를 조회하고 시각화합니다.
 
